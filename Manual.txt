@@ -1,0 +1,429 @@
+Marine Organism Levy Flight Simulation - Manual
+1. Project Overview
+This project simulates the Levy flight migration patterns of marine organisms in a global ocean environment. The simulation includes:
+
+Global migration capabilities with longitude/latitude boundary wrapping
+
+Temperature-weighted direction selection (optional)
+
+Dual Levy exponent experiments for comparative analysis
+
+Multiple agent behaviors with supply, lifespan, and boundary limitations
+
+Interactive visualization with real-time plotting and data export
+
+Full reproducibility through explicit random seed control
+
+2. System Requirements
+2.1 Software Requirements
+Python: Version 3.8 or higher
+
+Operating System: Windows 10/11, macOS 10.15+, or Linux with GUI support
+
+Required Libraries: See requirements.txt
+
+2.2 Hardware Recommendations
+CPU: Multi-core processor (4+ cores recommended)
+
+RAM: 8GB minimum, 16GB recommended for large simulations
+
+Storage: 1GB free space for data and outputs
+
+Display: 1920x1080 resolution for optimal GUI experience
+
+3. Installation
+3.1 Install Python Dependencies
+bash
+pip install -r requirements.txt
+3.2 Optional: Install Tkinter (Linux Users)
+bash
+# Ubuntu/Debian
+sudo apt-get install python3-tk
+
+# Fedora/RHEL
+sudo dnf install python3-tkinter
+
+# Arch Linux
+sudo pacman -S tk
+4. File Structure
+text
+simulation_project/
+├── main_200.py              # Main simulation engine
+├── ui_selector.py           # GUI configuration interface
+├── simulation_constants.py  # Global constants and parameters
+├── simulation_utils.py      # Utility functions and helper classes
+├── global_simulation_utils.py  # Global migration functions
+├── global_migration_test.py # Testing script for global migration
+├── requirements.txt         # Python dependencies
+├── simulation_config.json   # User configuration (auto-generated)
+├── merged_result.xlsx      # Default map file (180x360 grid)
+├── temperature.xlsx        # Temperature data file (optional)
+└── Manual.txt              # This manual
+5. Input File Specifications
+5.1 Map File (merged_result.xlsx)
+Format: Excel (.xlsx) file
+
+Grid Size: 180 rows × 360 columns (global scale: 1°×1° resolution)
+
+Cell Values:
+
+"G" : Coastal/Shallow water (Green zone - full supply)
+
+"B" : Open ocean (Blue zone - limited or no supply)
+
+"Y" : Land (Yellow zone - impassable)
+
+"<angle>-G" : Shallow water with current direction (e.g., "90-G")
+
+"<angle>-B" : Open ocean with current direction (e.g., "45-B")
+
+5.2 Temperature File (Optional for Weighted Mode)
+Format: Excel (.xlsx) file
+
+Grid Size: Must match map dimensions (180×360)
+
+Values: Temperature in degrees Celsius
+
+Usage: Used for temperature-weighted direction selection (50% weight)
+
+6. Configuration Parameters
+6.1 Global Constants (simulation_constants.py)
+python
+# Basic geographical limits
+MIN_LON, MAX_LON = -180, 180.0
+MIN_LAT, MAX_LAT = -90, 90
+
+# Movement parameters
+SELF_SPEED = 0.39724192  # Agent self-propelled speed (m/s)
+CURRENT_SPEED = 0.1      # Ocean current speed (m/s)
+LEVY_SCALE = 1000.0      # Scaling factor for Levy flight
+
+# Dual Levy exponents (modify these for dual experiments)
+LEVY_EXP_PRIMARY = 1.5   # First Levy exponent (default)
+LEVY_EXP_SECONDARY = 2   # Second Levy exponent (user-defined)
+
+# Temperature scoring (converts temperature to movement score)
+TEMP_SCORE = [
+    (5, 10, 0.814983),
+    (10, 15, 1.470517),
+    (15, 20, 2.600124),
+    (20, 25, 4.509877),
+    (25, 30, 7.679751),
+    (30, 35, 12.194591),
+    (35, 40, 4.353828),
+]
+6.2 Simulation Settings (Configurable via GUI)
+Number of Agents: 1-1000 agents (default: 500)
+
+Maximum Steps: Simulation steps (default: 100,000)
+
+Agent Speed: Self-propelled movement speed (m/s)
+
+Starting Location: Latitude/Longitude coordinates
+
+Pure Survival Time: Days agents can survive without supply
+
+Direction Mode: "weighted" (50% random + 50% temperature) or "random"
+
+Current Influence: "with_current" or "no_current"
+
+Global Simulation: Enable/disable boundary wrapping
+
+Lifespan Limit: Enable/disable maximum agent lifespan
+
+B-Zone Supply: Enable/disable partial supply in B zones
+
+6.3 Random Seed Configuration (Critical for Reproducibility)
+The simulation uses two independent random seeds to ensure complete reproducibility:
+
+Direction Seed:
+
+Controls the random direction selection for agents
+
+When left blank in the GUI, the program will generate a random seed and display it in the console output
+
+Can be set to any integer value for reproducible direction patterns
+
+Console output format: 方向种子留空，自动生成基础种子：123456（记录可复现） or 已设置基础方向种子：123456（方向选择可复现）
+
+Levy Seed:
+
+Controls the Levy step length (time t) generation for agents
+
+When left blank in the GUI, the program will generate a random seed and display it in the console output
+
+Can be set to any integer value for reproducible step length sequences
+
+Console output format: Levy种子留空，自动生成基础种子：654321（记录可复现） or 已设置基础Levy步长种子：654321（步长t可复现）
+
+Key Features of Seed Implementation:
+
+Each agent uses a derived seed from these base seeds (base seed + agent index) to ensure independence while maintaining reproducibility
+
+Seeds are saved in the configuration file (simulation_config.json) for future sessions
+
+Seeds are exported in the Excel summary sheet for complete documentation
+
+Both seeds are displayed in the interactive results window for immediate reference
+
+7. Running the Simulation
+7.1 Standard Mode (Single Levy Exponent)
+Run the GUI:
+
+bash
+python ui_selector.py
+Configure parameters in the interface:
+
+For reproducibility: Enter specific integer values for Direction Seed and Levy Seed
+
+For automatic generation: Leave seed fields blank (they will display "留空则随机生成")
+
+To reuse previous seeds: Seeds are automatically saved from last session
+
+Click "Run Simulation"
+
+View results in the interactive window
+
+Export data or images as needed
+
+7.2 Dual Levy Experiment Mode
+Enable "Dual LEVY_EXP Mode" in Advanced Controls
+
+Set LEVY_EXP_PRIMARY and LEVY_EXP_SECONDARY in simulation_constants.py
+
+Seeds are shared between the two simulations, ensuring the only difference is the Levy exponent
+
+Run simulation - first with primary exponent
+
+Close first window to automatically start second simulation
+
+Compare results between two Levy exponent values
+
+7.3 Global Migration Test Mode
+bash
+python global_migration_test.py
+Tests boundary crossing and global wrapping functionality
+
+Interactive direction preference controls
+
+Real-time statistics and visualization
+
+8. Key Features
+8.1 Global Wrapping Migration
+Enabled: Agents can cross ±180° longitude boundaries
+
+Disabled: Agents die when reaching map edges
+
+Implementation: Uses coordinate normalization and path segmentation
+
+Visualization: Correct path plotting across date line
+
+8.2 Temperature-Weighted Direction Selection
+Mode: Weighted (50% random + 50% temperature-weighted)
+
+Limitation: Requires complete temperature grid (180×360)
+
+Scoring: Converts temperature to movement preference scores
+
+Note: This feature is primarily theoretical due to lack of complete Mesozoic temperature data
+
+8.3 Ocean Currents
+Representation: Directional vectors embedded in map cells
+
+Influence Mode: Can be enabled/disabled
+
+Speed: Fixed at 0.1 m/s (configurable)
+
+Effect: Vector addition with agent's self-propelled movement
+
+8.4 Agent Lifecycle
+Birth: Start at specified coordinates
+
+Movement: Levy flight with directional constraints
+
+Supply Management:
+
+G zones: Full supply reset
+
+B zones: Partial or no supply (configurable)
+
+Y zones: Impassable (land)
+
+Death Conditions:
+
+Supply depletion (starvation)
+
+Lifespan expiration (if enabled)
+
+Boundary crossing (if global mode disabled)
+
+9. Output Files
+9.1 Data Export (XLSX Format)
+Agent Details: Individual agent statistics (status, death reason, distance, time)
+
+Summary Statistics: Averages, totals, and seed information (Direction Seed, Levy Seed, LEVY_EXP)
+
+Sheets: Two worksheets: "Agent详细数据" and "统计汇总"
+
+Seed Documentation: Complete seed information for exact replication
+
+9.2 Image Export (PNG Format)
+Format: High-resolution (300 DPI) transparent PNG
+
+Content: Migration paths with color coding:
+
+Green: Alive agents
+
+Orange: Lifespan deaths
+
+Red: Supply deaths
+
+Gray: Other deaths
+
+Customization: Color chooser for alive agents
+
+9.3 Configuration Auto-Save
+File: simulation_config.json
+
+Content: All GUI settings including random seeds for next session
+
+Location: Same directory as scripts
+
+9.4 Console Output Information
+When running simulations, key information is printed to the console:
+
+text
+方向种子留空，自动生成基础种子：382947（记录可复现）
+Levy种子留空，自动生成基础种子：583921（记录可复现）
+当前模拟LEVY_EXP：1.5
+使用的起点坐标: lat=18.56, lon=101.45
+使用的自速度: 0.39724192
+使用的洋流模式: with_current
+使用的方向模式: weighted
+使用的寿命限制: False, 寿命年数: 48.6
+10. Experimental Considerations
+10.1 Temperature Data Limitation
+Important Note: The temperature-weighted direction feature is included for completeness but has limited practical application in Mesozoic research due to:
+
+Data Scarcity: Complete global sea surface temperature datasets for the Triassic period are rare
+
+Data Resolution: Available data often lacks the required 1°×1° resolution
+
+Temporal Gaps: Discontinuous temporal coverage in geological records
+
+Model Uncertainty: High uncertainty in paleoclimate reconstructions
+
+Recommendation: Use "random" direction mode for most experimental scenarios unless high-quality temperature data is available.
+
+10.2 Dual Levy Experiments
+Purpose: Compare migration patterns under different Levy exponents
+
+Interpretation:
+
+Lower exponents (<2): Longer "super-diffusive" movements
+
+Higher exponents (>2): More localized exploration
+
+Exponent=2: Brownian motion (standard diffusion)
+
+Scientific Value: Useful for studying optimal foraging strategies
+
+10.3 Reproducibility and Random Seeds
+Seed Management: The simulation uses two separate seeds for direction and Levy step generation, allowing independent control of these two stochastic processes.
+
+Automatic Seed Generation: If seeds are not provided, the program will generate random seeds and display them in the console output. These seeds are also saved in the exported data file.
+
+Replication: To exactly replicate a simulation, note the seeds from the console output or exported data and enter them in the GUI for subsequent runs.
+
+Seed Documentation: Always record the seeds used in experiments for scientific reproducibility.
+
+10.4 Experimental Workflow Recommendations
+Pilot Studies: Run simulations with auto-generated seeds to establish baseline parameters
+
+Formal Experiments: Use fixed seeds for reproducible results
+
+Parameter Sweeps: Vary one parameter at a time while keeping seeds constant
+
+Documentation: Always include seed values in experimental records and publications
+
+11. Troubleshooting
+11.1 Common Issues
+Issue	Solution
+"Map size mismatch" error	Ensure map and temperature files have identical dimensions (180×360)
+Tkinter not found (Linux)	Install python3-tk package (see Installation section)
+Memory errors with many agents	Reduce agent count or maximum steps
+Slow performance	Disable real-time rendering for large simulations
+Missing Excel file error	Place merged_result.xlsx in project directory
+Plotting errors	Ensure matplotlib backend is set to TkAgg
+Non-reproducible results	Check that both Direction Seed and Levy Seed are set to specific values
+11.2 Performance Optimization
+Large Simulations (>1000 agents or >500k steps):
+
+Disable real-time visualization
+
+Increase refresh interval
+
+Reduce path sampling frequency
+
+Memory Management:
+
+Enable garbage collection (gc.collect())
+
+Close figures after use
+
+Use numpy arrays instead of Python lists
+
+11.3 Debug Mode
+Add debug prints by modifying main_200.py:
+
+python
+# Set debug level (1=minimal, 3=verbose)
+DEBUG_LEVEL = 2
+12. Scientific Applications
+12.1 Paleobiogeography
+Study ancient marine organism dispersal
+
+Model Triassic marine faunal distributions
+
+Test migration corridor hypotheses
+
+12.2 Behavioral Ecology
+Analyze optimal foraging strategies
+
+Study Levy flight efficiency in different environments
+
+Compare random vs. directed movement patterns
+
+12.3 Oceanographic Modeling
+Test current influence on organism dispersal
+
+Model larval transport pathways
+
+Study connectivity between marine habitats
+
+13. Citation and Acknowledgments
+If using this software in research, please cite:
+
+text
+[Software Name]: Marine Organism Levy Flight Simulation
+Version: 2.0.0
+Author: [Your Name/Institution]
+Year: 2024
+Important: When publishing results, always include the random seed values used in your simulations for reproducibility.
+
+14. Contact and Support
+For questions, bug reports, or feature requests:
+
+Email: [your-email@institution.edu]
+
+Repository: [GitHub/other repository link]
+
+Documentation: See inline code comments and this manual
+
+15. License
+[Specify your license - e.g., MIT, GPL, or academic use only]
+
+Version: 2.0.0
+Last Updated: October 2024
+Compatibility: Python 3.8+, Windows/macOS/Linux
+Reproducibility: Full random seed control for Direction and Levy step generation
