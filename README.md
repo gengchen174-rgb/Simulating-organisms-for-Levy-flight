@@ -99,9 +99,9 @@ This is very important for science! The program gives you full control over rand
 
 ### Flexibility
 You can:
-- Run quick tests with just 10 animals
-- Run detailed studies with 1000 animals and 100,000 time steps
-- Compare different movement strategies
+- After understanding the upper limit of stored energy, average movement speed, and the coordinate position you need to release, you can run the program
+- Run detailed studies with 1000 animals and 100,000 time steps(This is not a fixed value; you can modify it)
+- Compare different levy flignt movement strategies
 - Test with or without ocean currents
 
 ## What Makes This Program Special
