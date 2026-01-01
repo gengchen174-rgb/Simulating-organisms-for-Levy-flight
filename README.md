@@ -70,7 +70,8 @@ This is a simulation program that models how marine animals move and migrate acr
 - Click "Run Simulation"
 - Watch animals move across the map in real time
 - See statistics about their survival and travel patterns
-<img width="1502" height="834" alt="屏幕截图 2025-12-31 101937" src="https://github.com/user-attachments/assets/7f871481-21cb-40e2-aa15-572c6077bcbf" />
+<img width="1278" height="744" alt="Besanosaurus leptorhynchus-" src="https://github.com/user-attachments/assets/6ca47072-76fa-4963-8366-d03a210cad42" />
+
 
 ### Step 5: Save Results
 - Export maps as picture files
