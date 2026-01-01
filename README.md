@@ -25,6 +25,7 @@ This is a simulation program that models how marine animals move and migrate acr
 
 ### 3. **Smart Direction Choices**
 - Animals can choose where to go based on water temperature (if temperature data is available)
+- Follow the direction of ocean currents and occasionally return to random directions
 - Or they can just choose random directions
 - You can block certain directions (like "no going north")
 
