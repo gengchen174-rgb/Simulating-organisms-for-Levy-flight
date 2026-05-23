@@ -1,0 +1,22 @@
+{
+  "number_of_agents": 10,
+  "max_steps": 100000,
+  "enable_lifespan_limit": true,
+  "lifespan_years": 30.0,
+  "current_influence_mode": "with_current",
+  "start_lat": 5.42,
+  "start_lon": 21.15,
+  "self_speed": 1.43607056,
+  "pure_full_state_survival_days": 39.36291085,
+  "direction_seed": null,
+  "levy_seed": null,
+  "enable_lifespan_terminal": false,
+  "direction_mode": "random",
+  "enable_b_supply": true,
+  "b_supply_percent": 50.0,
+  "enable_dual_levy": true,
+  "step_time_multiplier": 1,
+  "maximize_window": true,
+  "auto_save_visualization": false,
+  "record_video": false
+}

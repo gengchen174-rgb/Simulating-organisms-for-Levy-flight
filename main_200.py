@@ -10,6 +10,13 @@ from matplotlib.colors import ListedColormap
 from tqdm import tqdm
 import gc
 
+# 视频录制相关导入
+try:
+    import cv2
+    VIDEO_AVAILABLE = True
+except ImportError:
+    VIDEO_AVAILABLE = False
+
 # 导入全局常量
 from simulation_constants import *  # 导入所有常量
 
@@ -91,8 +98,34 @@ ENABLE_LIFESPAN_TERMINAL = config["enable_lifespan_terminal"]
 # 它们会在 run_simulation_fast 函数中被设置为局部变量
 
 
+def calculate_step_duration(levy_rng: np.random.RandomState, levy_exp: float, self_speed: float,
+                            step_time_multiplier: int, max_migration_seconds: float, time_since_G: float) -> float:
+    """
+    计算单次步进的持续时间（秒）
+    
+    参数:
+        levy_rng: Levy步长随机数生成器
+        levy_exp: Levy分布指数
+        self_speed: 生物自身速度
+        step_time_multiplier: 步进时间缩放因子
+        max_migration_seconds: 最大无补给存活时间
+        time_since_G: 距离上次G区域补给的时间
+    
+    返回:
+        float: 本次步进的持续时间（秒）
+    """
+    LEVY_TIME_SCALE = LEVY_SCALE / self_speed
+    t = LEVY_TIME_SCALE * (levy_rng.pareto(levy_exp) + 1.0)
+    t *= step_time_multiplier
+    
+    remaining_time = max(0.0, max_migration_seconds - time_since_G)
+    t = min(t, remaining_time)
+    
+    return t
+
+
 def choose_alpha(row: int, col: int, grid_map, temp_map, ignore_disabled=False,
-                 dir_rng: random.Random = None, disabled_directions=None) -> float:
+                 dir_rng: random.Random = None, disabled_directions=None, direction_mode="weighted") -> float:
     """
     方向选择逻辑：彻底拆分无温度模式与加权模式，无温度模式完全脱离温度依赖
     - 'random'（无温度模式）：0-360°完全随机，仅遵守方向禁用限制
@@ -100,6 +133,7 @@ def choose_alpha(row: int, col: int, grid_map, temp_map, ignore_disabled=False,
     新增参数：
         dir_rng: 独立的随机生成器（控制方向种子），默认None时使用全局random库（兼容原有调用）
         disabled_directions: 禁用方向字典，从配置或全局常量获取
+        direction_mode: 方向模式（"random" 或 "weighted"）
     """
     # 如果未传入 disabled_directions，使用默认值
     if disabled_directions is None:
@@ -219,7 +253,7 @@ class Agent:
 
     def __init__(self, lat: float, lon: float, dir_rng: random.Random, levy_rng: np.random.RandomState,
                  levy_exp: float, self_speed: float, enable_global_simulation: bool = False,
-                 max_migration_seconds: float = 0.0, agent_id: int = 0):
+                 max_migration_seconds: float = 0.0, agent_id: int = 0, step_time_multiplier: int = 1):
         self.id = agent_id  # 存储Agent编号
         self.lat = lat
         self.lon = lon
@@ -235,6 +269,7 @@ class Agent:
         self.self_speed = self_speed
         self.enable_global_simulation = enable_global_simulation
         self.max_migration_seconds = max_migration_seconds
+        self.step_time_multiplier = step_time_multiplier  # 步进时间缩放因子
 
         # 如果是全球模拟模式，初始化路径管理器
         if self.enable_global_simulation:
@@ -244,7 +279,7 @@ class Agent:
 
     def step(self, grid, lats_inc, lons_inc, temp_map, grid_cell_types,
              current_influence_mode: str, ENABLE_LIFESPAN_LIMIT: bool = False,
-             LIFESPAN_YEARS: float = 0.0):
+             LIFESPAN_YEARS: float = 0.0, direction_mode: str = "weighted"):
         """
         执行单步移动
 
@@ -252,6 +287,7 @@ class Agent:
             current_influence_mode: 洋流影响模式
             ENABLE_LIFESPAN_LIMIT: 是否启用寿命限制
             LIFESPAN_YEARS: 寿命年限
+            direction_mode: 方向模式（"random" 或 "weighted"）
             
         返回:
             float: 本次移动的步进时长（秒），如果Agent已死亡或未移动则返回0.0
@@ -271,15 +307,23 @@ class Agent:
                 # 添加起点到全局路径管理器
                 self.global_path_manager.add_point(self.lon, self.lat)
             # print(f"After normalization: lat={self.lat}, lon={self.lon}")
+        else:
+            # 非全球模拟模式下，确保不初始化全局路径管理器
+            # 修复：移除可能错误初始化的全局路径管理器
+            if hasattr(self, 'global_path_manager'):
+                delattr(self, 'global_path_manager')
 
         # ------------ 使用实例变量self.levy_exp和self.self_speed ------------
-        LEVY_TIME_SCALE = LEVY_SCALE / self.self_speed  # 使用实例的速度
-        t = LEVY_TIME_SCALE * (self.levy_rng.pareto(self.levy_exp) + 1.0)
+        # 调用独立函数计算步进持续时间
+        t = calculate_step_duration(
+            levy_rng=self.levy_rng,
+            levy_exp=self.levy_exp,
+            self_speed=self.self_speed,
+            step_time_multiplier=self.step_time_multiplier,
+            max_migration_seconds=self.max_migration_seconds,
+            time_since_G=self.time_since_G
+        )
         # -------------------------------------------------------------------
-
-        # 使用实例存储的 max_migration_seconds
-        remaining_time = max(0.0, self.max_migration_seconds - self.time_since_G)
-        t = min(t, remaining_time)
 
         # 累加总存活时间
         self.total_alive_seconds += t
@@ -298,12 +342,13 @@ class Agent:
         ignore_disabled = current_cell.cell_type == "Y"
         try:
             # 传入独立方向生成器，控制方向种子
-            # 注意：direction_mode 是从 simulation_constants 导入的全局变量
-            from simulation_constants import direction_mode, disabled_directions
+            # 修复：使用传入的direction_mode参数而不是全局变量
+            from simulation_constants import disabled_directions
             alpha = choose_alpha(start_i, start_j, grid_cell_types, temp_map,
                                  ignore_disabled=ignore_disabled,
                                  dir_rng=self.dir_rng,
-                                 disabled_directions=disabled_directions)
+                                 disabled_directions=disabled_directions,
+                                 direction_mode=direction_mode)  # 修复：传递direction_mode参数
         except Exception:
             # 异常时用独立生成器，而非全局random
             alpha = self.dir_rng.uniform(0, 360)
@@ -437,13 +482,37 @@ class Agent:
 
             self.lat, self.lon = current_lat, current_lon
 
-        # 第一步：检查死亡条件（在移动和补给之前）
-        # 补给超时死亡检查
+        # 从配置中获取B区域补给设置
+        from simulation_constants import DEFAULT_CONFIG
+        config = load_config()
+        enable_b_supply = config.get("enable_b_supply", DEFAULT_CONFIG["enable_b_supply"])
+        b_supply_percent = config.get("b_supply_percent", DEFAULT_CONFIG["b_supply_percent"])
+        
+        # 第一步：更新time_since_G（使用放大后的t，确保与step_time_multiplier同步）
+        target_cell = locate_cell(self.lat, self.lon, grid, lats_inc, lons_inc, self.enable_global_simulation)
+        if target_cell is None and not self.enable_global_simulation:  # 全球模拟不禁用边界死亡
+            self.alive = False
+            self.death_type = "out_of_bounds"
+            return t
+        
+        # 更新time_since_G（使用已放大的t，确保流逝速度与step_time_multiplier同步）
+        if target_cell.cell_type == "G":
+            self.time_since_G = 0.0
+        elif target_cell.cell_type == "B" and enable_b_supply:
+            b_supply_factor = b_supply_percent / 100.0
+            reduction_amount = self.max_migration_seconds * b_supply_factor
+            self.time_since_G += t  # 先增加时间（使用放大后的t）
+            self.time_since_G = max(0.0, self.time_since_G - reduction_amount)
+        else:
+            self.time_since_G += t  # 普通区域和未启用补给的B区域（使用放大后的t）
+        
+        # 第二步：检查死亡条件（在time_since_G更新之后）
+        # 补给超时死亡检查（time_since_G已使用放大后的t更新）
         if self.time_since_G >= self.max_migration_seconds:
             self.alive = False
             self.death_type = "supply"
             print(f"Agent[{self.id}] 补给超时死亡: time_since_G={self.time_since_G:.1f}, max={self.max_migration_seconds:.1f}")
-            return t  # 直接返回，不再进行后续移动和补给
+            return t  # 直接返回，不再进行后续处理
         
         # 寿命到期死亡（仅启用寿命限制时）
         if ENABLE_LIFESPAN_LIMIT and self.alive:
@@ -452,33 +521,7 @@ class Agent:
                 self.alive = False
                 self.death_type = "lifespan"
                 print(f"Agent[{self.id}] 寿命到期死亡: total_alive_seconds={self.total_alive_seconds:.1f}, max={max_life_seconds:.1f}")
-                return t  # 直接返回，不再进行后续移动和补给
-
-        # 第二步：更新生存状态和死亡类型
-        target_cell = locate_cell(self.lat, self.lon, grid, lats_inc, lons_inc, self.enable_global_simulation)
-        if target_cell is None and not self.enable_global_simulation:  # 全球模拟不禁用边界死亡
-            self.alive = False
-            self.death_type = "out_of_bounds"
-            return t
-
-        # 从配置中获取B区域补给设置
-        from simulation_constants import DEFAULT_CONFIG
-        config = load_config()
-        enable_b_supply = config.get("enable_b_supply", DEFAULT_CONFIG["enable_b_supply"])
-        b_supply_percent = config.get("b_supply_percent", DEFAULT_CONFIG["b_supply_percent"])
-        
-        # 第三步：区域补给逻辑（在B区域，time_since_G总是增加t）
-        if target_cell.cell_type == "G":
-            self.time_since_G = 0.0
-        elif target_cell.cell_type == "B" and enable_b_supply:
-            # B区域补给：按百分比减少补给时间（使用load_max_migration_seconds乘以用户输入的百分比）
-            # 只有当百分比大于0时才执行补给逻辑
-            b_supply_factor = b_supply_percent / 100.0
-            reduction_amount = self.max_migration_seconds * b_supply_factor
-            self.time_since_G += t  # 先增加时间
-            self.time_since_G = max(0.0, self.time_since_G - reduction_amount)  # 再减少补给时间
-        else:
-            self.time_since_G += t  # 普通区域和未启用补给的B区域
+                return t  # 直接返回，不再进行后续处理
         
         # 返回本次移动的步进时长
         return t
@@ -505,19 +548,53 @@ class Agent:
                 self.global_path_manager.add_point(lon, lat)
 
     def _crosses_land(self, lat1, lon1, lat2, lon2, grid, lats_inc, lons_inc, n_samples=20):
-        """检查路径是否穿越陆地"""
-        for k in range(1, n_samples + 1):
-            frac = k / (n_samples + 1)
-            lat = lat1 + frac * (lat2 - lat1)
-            lon = lon1 + frac * (lon2 - lon1)
+        """检查路径是否穿越陆地（优化版）"""
+        # 提前检查起点是否在陆地
+        start_cell = locate_cell(lat1, lon1, grid, lats_inc, lons_inc, self.enable_global_simulation)
+        if start_cell is not None and start_cell.cell_type == "Y":
+            return True
+        
+        # 使用快速距离近似计算（避免haversine的复杂三角函数）
+        # 对于采样点计算，不需要高精度距离
+        delta_lat = abs(lat2 - lat1)
+        delta_lon = abs(lon2 - lon1)
+        
+        # 简化的距离估算：使用经纬度差的平方和平方根
+        # 乘以平均每度距离（约111公里）得到近似距离（米）
+        # 为了保守估计采样点数，使用略小的系数（100公里/度）
+        distance_estimate_m = math.hypot(delta_lat, delta_lon) * 100 * 1000
+        
+        # 采样策略：每200公里一个采样点，且包含终点
+        SAMPLE_INTERVAL_M = 200 * 1000  # 200公里 = 200000米
+        
+        # 计算采样点数：距离 / 200公里，向上取整
+        if distance_estimate_m <= SAMPLE_INTERVAL_M:
+            # 距离小于等于200公里，只检测终点
+            num_samples = 1
+        else:
+            # 距离大于200公里，按每200公里一个采样点计算
+            num_samples = int(math.ceil(distance_estimate_m / SAMPLE_INTERVAL_M))
+        
+        # 缓存全局模拟设置，避免重复属性访问
+        global_sim = self.enable_global_simulation
+        
+        # 计算步长（包含终点）
+        dlat = (lat2 - lat1) / num_samples
+        dlon = (lon2 - lon1) / num_samples
+        
+        # 采样检测（包含终点）
+        for k in range(1, num_samples + 1):
+            lat = lat1 + dlat * k
+            lon = lon1 + dlon * k
 
             # 如果是全球模拟，先标准化坐标
-            if self.enable_global_simulation:
+            if global_sim:
                 lon, lat = normalize_coordinates(lon, lat)
 
-            cell = locate_cell(lat, lon, grid, lats_inc, lons_inc, self.enable_global_simulation)
+            cell = locate_cell(lat, lon, grid, lats_inc, lons_inc, global_sim)
             if cell is not None and cell.cell_type == "Y":
                 return True
+        
         return False
 
 
@@ -534,20 +611,36 @@ def run_simulation_fast(
         max_life_seconds=0,
         direction_mode="weighted",
         show_interactive=True,
-        enable_global_simulation=True  # 新增：启用全球模拟
+        enable_global_simulation=True,  # 新增：启用全球模拟
+        export_prefix="simulation",
+        enable_b_supply=False,
+        b_supply_percent=50.0,
+        start_lat=None,
+        start_lon=None,
+        self_speed=None,
+        pure_survival_days=None,
+        current_influence_mode=None,
+        enable_lifespan_limit=None,
+        lifespan_years=None,
+        verbose_params=True,  # 新增：控制参数信息打印
+        step_time_multiplier=1,  # 新增：步进时间缩放因子
+        maximize_window=False,  # 新增：模拟结束后是否最大化窗口
+        auto_save_visualization=False,  # 新增：是否在模拟过程中自动保存可视化
+        record_video=False  # 新增：是否录制模拟视频
 ):
     """修复：正确使用配置参数而不是全局变量"""
     # 加载配置获取最新的用户输入
     config = load_config()
 
-    # 修复：使用配置中的值而不是全局变量
-    start_lat_local = config["start_lat"]
-    start_lon_local = config["start_lon"]
-    SELF_SPEED_local = config["self_speed"]  # 从配置读取速度
-    current_influence_mode_local = config["current_influence_mode"]
-    ENABLE_LIFESPAN_LIMIT_local = config["enable_lifespan_limit"]
-    LIFESPAN_YEARS_local = config["lifespan_years"]
-    pure_full_state_survival_days = config["pure_full_state_survival_days"]
+    # 修复：使用传入的参数值而不是配置中的值
+    # 确保传入的参数值优先于配置文件中的默认值
+    start_lat_local = start_lat if start_lat is not None else config["start_lat"]
+    start_lon_local = start_lon if start_lon is not None else config["start_lon"]
+    SELF_SPEED_local = self_speed if self_speed is not None else config["self_speed"]
+    current_influence_mode_local = current_influence_mode if current_influence_mode is not None else config["current_influence_mode"]
+    ENABLE_LIFESPAN_LIMIT_local = enable_lifespan_limit if enable_lifespan_limit is not None else config["enable_lifespan_limit"]
+    LIFESPAN_YEARS_local = lifespan_years if lifespan_years is not None else config["lifespan_years"]
+    pure_full_state_survival_days = pure_survival_days if pure_survival_days is not None else config["pure_full_state_survival_days"]
 
     # 计算基于配置的迁移时间
     MAX_MIGRATION_SECONDS = load_max_migration_seconds(pure_full_state_survival_days)
@@ -556,11 +649,36 @@ def run_simulation_fast(
     if ENABLE_LIFESPAN_LIMIT_local:
         max_life_seconds = LIFESPAN_YEARS_local * 365 * 24 * 3600
 
-    print(f"使用的起点坐标: lat={start_lat_local}, lon={start_lon_local}")
-    print(f"使用的自速度: {SELF_SPEED_local}")
-    print(f"使用的洋流模式: {current_influence_mode_local}")
-    print(f"使用的方向模式: {direction_mode}")
-    print(f"使用的寿命限制: {ENABLE_LIFESPAN_LIMIT_local}, 寿命年数: {LIFESPAN_YEARS_local}")
+    # 控制参数信息打印：verbose_params=True时打印完整信息，False时只打印关键差异
+    if verbose_params:
+        print(f"使用的起点坐标: lat={start_lat_local}, lon={start_lon_local}")
+        print(f"使用的自速度: {SELF_SPEED_local}")
+        print(f"使用的洋流模式: {current_influence_mode_local}")
+        print(f"使用的方向模式: {direction_mode}")
+        print(f"使用的寿命限制: {ENABLE_LIFESPAN_LIMIT_local}, 寿命年数: {LIFESPAN_YEARS_local}")
+
+        # --------- 初始化种子（用于为每个Agent创建独立RNG） ----------
+        # 记录基础种子用于复现
+        if direction_seed is None:
+            direction_seed = random.randint(0, 1000000)
+            print(f"方向种子留空，自动生成基础种子：{direction_seed}（记录可复现）")
+        else:
+            print(f"已设置基础方向种子：{direction_seed}（方向选择可复现）")
+
+        if levy_seed is None:
+            levy_seed = np.random.randint(0, 1000000)
+            print(f"Levy种子留空，自动生成基础种子：{levy_seed}（记录可复现）")
+        else:
+            print(f"已设置基础Levy步长种子：{levy_seed}（步长t可复现）")
+    else:
+        # 非详细模式：只打印关键差异信息
+        print(f"导出前缀: {export_prefix}")
+        if direction_seed is None:
+            direction_seed = random.randint(0, 1000000)
+        if levy_seed is None:
+            levy_seed = np.random.randint(0, 1000000)
+
+    print(f"当前模拟LEVY_EXP：{levy_exp}")
 
     # 处理 temp_path：空字符串或不存在文件 => None
     if temp_path == "" or (temp_path is not None and not Path(temp_path).exists()):
@@ -572,22 +690,6 @@ def run_simulation_fast(
             raise FileNotFoundError(
                 "Temperature file path is required (weighted mode).\nPlease select a valid Excel file."
             )
-
-    # --------- 初始化种子（用于为每个Agent创建独立RNG） ----------
-    # 记录基础种子用于复现
-    if direction_seed is None:
-        direction_seed = random.randint(0, 1000000)
-        print(f"方向种子留空，自动生成基础种子：{direction_seed}（记录可复现）")
-    else:
-        print(f"已设置基础方向种子：{direction_seed}（方向选择可复现）")
-
-    if levy_seed is None:
-        levy_seed = np.random.randint(0, 1000000)
-        print(f"Levy种子留空，自动生成基础种子：{levy_seed}（记录可复现）")
-    else:
-        print(f"已设置基础Levy步长种子：{levy_seed}（步长t可复现）")
-
-    print(f"当前模拟LEVY_EXP：{levy_exp}")
 
     # 1. 加载地图（调用工具脚本函数）
     grid = load_map(excel_path)
@@ -624,7 +726,8 @@ def run_simulation_fast(
             start_lat_local, start_lon_local, 
             agent_dir_rng, agent_levy_rng,  # 传入独立的RNG实例
             levy_exp, SELF_SPEED_local, 
-            enable_global_simulation, MAX_MIGRATION_SECONDS, i
+            enable_global_simulation, MAX_MIGRATION_SECONDS, i,
+            step_time_multiplier  # 传递步进时间缩放因子
         ))
     print(f"初始投射地点：lat={start_lat_local}, lon={start_lon_local}")
 
@@ -669,27 +772,31 @@ def run_simulation_fast(
     except Exception:
         pbar = None
 
-    # 图形准备
-    plt.ioff()
+    # 图形准备 - 仅在show_interactive=True时创建图形
     fig = None
     ax = None
-    try:
-        fig, ax = plt.subplots(figsize=(12, 7), num="Marine Organism Levy Flight Simulation")
-        ax.imshow(grid_img, cmap=cmap, origin="upper",
-                  extent=[MIN_LON, MAX_LON, MIN_LAT, MAX_LAT],
-                  interpolation="nearest", aspect="auto")
-    except Exception as e:
-        # 若图形系统不可用，继续模拟但不绘图
-        print(f"[Warning] matplotlib 绘图失败，切换为无界面模式: {e}")
-        fig = None
-        ax = None
+    
+    # 仅在需要显示交互窗口时才创建图形
+    if show_interactive:
+        try:
+            plt.ion()  # 开启交互模式
+            fig, ax = plt.subplots(figsize=(12, 7), num="Marine Organism Levy Flight Simulation")
+            ax.imshow(grid_img, cmap=cmap, origin="upper",
+                      extent=[MIN_LON, MAX_LON, MIN_LAT, MAX_LAT],
+                      interpolation="nearest", aspect="auto")
+            fig.show()  # 立即显示图形窗口
+        except Exception as e:
+            # 若图形系统不可用，继续模拟但不绘图
+            print(f"[Warning] matplotlib 绘图失败，切换为无界面模式: {e}")
+            fig = None
+            ax = None
 
     path_lines = []  # 存储路径线
     agent_points = []  # 存储agent当前位置点
     agent_colors = []  # 存储每个agent的唯一颜色
-    if use_realtime_refresh and fig is not None:
+    # 初始化图形界面元素（只要show_interactive=True就初始化）
+    if fig is not None and show_interactive:
         try:
-            plt.ion()
             # 为每个agent生成唯一颜色
             agent_colors = plt.cm.Set1(np.linspace(0, 1, len(agents)))
             
@@ -697,14 +804,33 @@ def run_simulation_fast(
             agent_points = [ax.plot([], [], marker="o", markersize=2, alpha=0.7, color=color)[0] for _, color in zip(agents, agent_colors)]
             # 为每个agent创建一组用于显示路径段的线条
             path_lines = [[] for _ in agents]
-            fig.show()
-        except Exception:
+        except Exception as e:
+            print(f"[Warning] 初始化图形元素失败: {e}")
             agent_points = []
             path_lines = []
             agent_colors = []
 
-    # 实时刷新间隔
-    if use_realtime_refresh:
+    # 视频录制初始化
+    video_writer = None
+    if record_video and VIDEO_AVAILABLE and fig is not None:
+        try:
+            # 获取画布尺寸
+            canvas_width, canvas_height = fig.get_size_inches() * fig.dpi
+            video_size = (int(canvas_width), int(canvas_height))
+            
+            # 创建视频写入器
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            video_path = f"simulation_video_{timestamp}.mp4"
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            video_writer = cv2.VideoWriter(video_path, fourcc, 10.0, video_size)
+            print(f"视频录制已启动，将保存到: {video_path}")
+        except Exception as e:
+            print(f"视频录制初始化失败: {e}")
+            video_writer = None
+
+    # 实时刷新间隔（只要show_interactive=True就启用实时刷新）
+    if show_interactive:
         if enable_lifespan_terminal:
             refresh_interval = 100
         else:
@@ -724,13 +850,13 @@ def run_simulation_fast(
                     continue
                 # 接收step方法返回的步进时长
                 step_duration = ag.step(grid, lats_inc, lons_inc, temp_map, grid_cell_types,
-                                      current_influence_mode_local, ENABLE_LIFESPAN_LIMIT_local, LIFESPAN_YEARS_local)
+                                      current_influence_mode_local, ENABLE_LIFESPAN_LIMIT_local, LIFESPAN_YEARS_local, direction_mode)
                 # 可以在这里使用步进时长进行额外处理，比如记录每个agent的移动时间
                 # 示例：可以将步进时长存储到agent对象中或进行统计分析
                 # ag.recent_step_durations.append(step_duration)
 
-            # 实时刷新
-            if use_realtime_refresh and fig is not None and refresh_interval is not None:
+            # 实时刷新（只要show_interactive=True且图形存在就刷新）
+            if fig is not None and show_interactive and refresh_interval is not None:
                 if actual_steps % refresh_interval == 0:
                     # 实时计算死亡统计
                     alive_count = sum(1 for a in agents if a.alive)
@@ -806,11 +932,21 @@ def run_simulation_fast(
                             # 绘制完整路径
                             line = ax.plot(xs, ys, linewidth=0.5, alpha=0.7, color=agent_colors[i])[0]
                             path_lines[i].append(line)
-                    try:
-                        fig.canvas.draw_idle()
-                        plt.pause(0.001)
-                    except Exception:
-                        pass
+                    # 仅在show_interactive=True时更新图形
+                    if show_interactive and fig is not None:
+                        try:
+                            fig.canvas.draw_idle()
+                            plt.pause(0.001)
+                            
+                            # 录制视频帧
+                            if video_writer is not None:
+                                fig.canvas.draw()
+                                frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+                                frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+                                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                                video_writer.write(frame)
+                        except Exception:
+                            pass
 
             # 以累计寿命为终止模式
             if enable_lifespan_terminal:
@@ -827,8 +963,8 @@ def run_simulation_fast(
                     print(f"\n所有Agent已在第{actual_steps}步完成（死亡或达到最大寿命），开始渲染Levy路线...")
                     print(f"完成统计: 补给死亡={supply_death_count}, 寿命死亡={lifespan_death_count}, 边界死亡={bounds_death_count}")
                     
-                    # 先完成当前步的渲染（如果启用了实时渲染）
-                    if use_realtime_refresh and fig is not None:
+                    # 先完成当前步的渲染（如果启用了交互模式）
+                    if fig is not None and show_interactive:
                         try:
                             # 绘制所有agent的完整路径
                             for i, ag in enumerate(agents):
@@ -898,8 +1034,8 @@ def run_simulation_fast(
                     print(f"\n所有Agent已在第{actual_steps}步死亡，开始渲染Levy路线...")
                     print(f"死亡统计: 补给死亡={supply_death_count}, 寿命死亡={lifespan_death_count}, 边界死亡={bounds_death_count}")
                     
-                    # 先完成当前步的渲染（如果启用了实时渲染）
-                    if use_realtime_refresh and fig is not None:
+                    # 先完成当前步的渲染（如果启用了交互模式）
+                    if fig is not None and show_interactive:
                         try:
                             # 绘制所有agent的完整路径
                             for i, ag in enumerate(agents):
@@ -939,7 +1075,7 @@ def run_simulation_fast(
     finally:
         # 确保关闭图形和资源
         try:
-            if use_realtime_refresh and fig is not None:
+            if fig is not None:
                 plt.ioff()
                 plt.close(fig)
         except Exception:
@@ -947,11 +1083,11 @@ def run_simulation_fast(
         # 强制回收
         gc.collect()
 
-    # 非实时渲染时绘制完整路径图（在主循环结束后）
-    # ---- 在 run_simulation_fast 函数的非实时渲染部分 ----
+    # 非交互模式时绘制完整路径图（在主循环结束后）
+    # ---- 在 run_simulation_fast 函数的非交互模式部分 ----
     # 修改这部分代码：
     try:
-        if not use_realtime_refresh and ax is not None:
+        if not show_interactive and ax is not None:
             print("Simulation completed, drawing all paths ..")
 
             # 为每个agent生成唯一颜色
@@ -1018,9 +1154,9 @@ def run_simulation_fast(
     except Exception:
         pass
 
-    # 强制刷新画布（若存在）
+    # 强制刷新画布（若存在）- 仅在show_interactive=True时执行
     try:
-        if fig is not None:
+        if fig is not None and show_interactive:
             fig.canvas.draw()
     except Exception:
         pass
@@ -1028,7 +1164,22 @@ def run_simulation_fast(
     # 显示交互窗口（调用工具脚本函数）- 根据show_interactive参数决定
     try:
         if show_interactive:  # 只有show_interactive为True时才显示
-            show_interactive_window(fig, agents, actual_steps, max_steps, direction_seed, levy_seed, levy_exp)
+            show_interactive_window(fig, agents, actual_steps, max_steps, direction_seed, levy_seed, levy_exp,
+                                  start_lat=start_lat_local, start_lon=start_lon_local, 
+                                  self_speed=SELF_SPEED_local, direction_mode=direction_mode,
+                                  current_influence_mode=current_influence_mode_local,
+                                  enable_lifespan_limit=ENABLE_LIFESPAN_LIMIT_local,
+                                  lifespan_years=LIFESPAN_YEARS_local,
+                                  pure_full_state_survival_days=pure_full_state_survival_days,
+                                  enable_b_supply=enable_b_supply,
+                                  b_supply_percent=b_supply_percent,
+                                  enable_global_simulation=enable_global_simulation,
+                                  grid=grid,
+                                  lats_inc=lats_inc,
+                                  lons_inc=lons_inc,
+                                  step_time_multiplier=step_time_multiplier,
+                                  maximize_window=maximize_window,
+                                  record_video=record_video)
         else:
             # 如果不显示交互窗口，直接关闭图形
             if fig is not None:
@@ -1037,6 +1188,50 @@ def run_simulation_fast(
         # 若在无 GUI 环境或 show_interactive_window 抛错，忽略
         pass
 
+    # 自动导出结果（当不显示交互窗口时）
+    if not show_interactive:
+        print(f"自动导出结果，前缀: {export_prefix}")
+        try:
+            # 导入导出模块
+            from simulation_utils import export_png, export_agent_data
+            
+            # 自动导出PNG图片
+            export_png(agents, None, export_prefix=export_prefix)
+            print(f"已导出PNG文件: {export_prefix}.png")
+            
+            # 自动导出Agent数据到Excel
+            export_agent_data(agents, None, 
+                            direction_seed=direction_seed, 
+                            levy_seed=levy_seed, 
+                            levy_exp=levy_exp, 
+                            export_prefix=export_prefix,
+                            start_lat=start_lat_local,
+                            start_lon=start_lon_local,
+                            self_speed=SELF_SPEED_local,
+                            direction_mode=direction_mode,
+                            current_influence_mode=current_influence_mode_local,
+                            enable_lifespan_limit=ENABLE_LIFESPAN_LIMIT_local,
+                            lifespan_years=LIFESPAN_YEARS_local,
+                            pure_full_state_survival_days=pure_full_state_survival_days,
+                            enable_b_supply=enable_b_supply,
+                            b_supply_percent=b_supply_percent,
+                            enable_global_simulation=enable_global_simulation,
+                            n_agents=n_agents,
+                            max_steps=max_steps,
+                            actual_steps=actual_steps,
+                            grid=grid,
+                            lats_inc=lats_inc,
+                            lons_inc=lons_inc,
+                            step_time_multiplier=step_time_multiplier)
+            print(f"已导出Excel文件: {export_prefix}.xlsx")
+        except Exception as e:
+            print(f"自动导出结果时出错: {e}")
+    
+    # 释放视频写入器
+    if video_writer is not None:
+        video_writer.release()
+        print("视频录制已完成，文件已保存")
+    
     gc.collect()
 
     # 构建 summary 并返回（便于 UI 进一步处理）

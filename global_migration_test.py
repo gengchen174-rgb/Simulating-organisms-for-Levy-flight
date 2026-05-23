@@ -323,17 +323,27 @@ class GlobalTestAgent:
         }
 
 
-def run_global_migration_test(excel_path, n_agents=10, self_speed=100.0, start_lat=0.0, start_lon=0.0):
+def run_global_migration_test(excel_path, n_agents=None, self_speed=None, start_lat=None, start_lon=None):
     """
     运行全球迁移测试
 
     参数:
         excel_path: 地图文件路径
-        n_agents: Agent数量
-        self_speed: Agent速度
-        start_lat: 起始纬度
-        start_lon: 起始经度
+        n_agents: Agent数量（None时从配置读取）
+        self_speed: Agent速度（None时从配置读取）
+        start_lat: 起始纬度（None时从配置读取）
+        start_lon: 起始经度（None时从配置读取）
     """
+    # 从配置读取默认值
+    config = load_config()
+    if n_agents is None:
+        n_agents = config["number_of_agents"]
+    if self_speed is None:
+        self_speed = config["self_speed"]
+    if start_lat is None:
+        start_lat = config["start_lat"]
+    if start_lon is None:
+        start_lon = config["start_lon"]
     global SIMULATION_RUNNING, PREFERRED_DIRECTION
 
     print("=" * 60)
