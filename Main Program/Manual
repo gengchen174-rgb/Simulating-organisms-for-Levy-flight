@@ -1,1 +1,111 @@
-This folder contains the main program.
+# Marine Organism Lévy Flight Simulation Program – Quick Start Guide
+## 1. Document Overview
+This guide helps users quickly launch and operate the split Python simulation program. It covers directory structure, dependency installation, operating procedures, core functions and troubleshooting solutions, applicable to deployment of small and medium-sized projects.
+
+## 2. Directory Structure
+Place all files in the **same directory**. The structure is as follows:
+```
+marine_levy_simulation/  # Project folder
+├── main.py              # Main executable program (with global definitions)
+├── ui_scripts.py        # UI script (interaction logic)
+├── calc_scripts.py      # Calculation script (core simulation logic)
+└── requirements.txt     # List of dependent packages
+```
+
+## 3. Dependency Installation
+### 3.1 System Requirements
+- Python Version: 3.8 or above (3.9–3.11 recommended)
+- Operating System: Windows / macOS / Linux. For Windows, ensure Python is added to system environment variables.
+
+### 3.2 Installation Steps
+1. Open a terminal or command prompt, and navigate to the project directory:
+```bash
+cd /path/to/marine_levy_simulation  # Replace with your actual project path
+```
+
+2. Run the command to install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+If the installation fails, use the Tsinghua mirror source:
+```bash
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+## 4. Operating Procedures
+Run the following command in the project directory to launch the program:
+```bash
+python main.py
+```
+
+A **file selection window** will pop up after startup. Follow the steps below:
+1. **Select map file**: Click **Browse** to choose an Excel map file with the `.xlsx` extension.
+2. **Select temperature file (Weighted Mode only)**: In Weighted Mode, click **Browse** to load the matching temperature Excel file.
+3. **Select movement mode**
+   - **Weighted Mode**: 50% random movement + 50% temperature preference. A temperature file is required.
+   - **Random Mode**: Fully random movement. No temperature file is needed (the temperature selection box will be disabled automatically).
+
+4. **Parameter Configuration**
+   - *Number of Agents*: Quantity of organisms (default: 500, adjustable)
+   - *Max Steps*: Maximum simulation steps (default: 100000, adjustable)
+   - *Random Seed*: Optional. A fixed seed enables reproducible simulation results.
+   - *Lifespan Limit*: Check to set the maximum lifespan of organisms (unit: year).
+   - *Ocean Current Mode*: Toggle to enable or disable the impact of ocean currents (enabled by default).
+   - *Direction Lock*: Click direction buttons (↑↓←→) to disable corresponding movement directions. Buttons pressed indicate disabled status.
+
+5. Click **Run Simulation** to start the simulation. A progress bar will be displayed in the terminal.
+
+Once the simulation completes, a **result interaction window** will pop up:
+- **View simulation trajectory (left panel)**: Zoom and pan via the Matplotlib toolbar.
+- **Export PNG**: Click **Export PNG Image**, select the save path and customize the color of surviving organisms.
+- **View statistics (right panel)**: Displays total steps, survival count, distribution of death causes and other data.
+- **Close Window**: Click to exit the program.
+
+## 5. Core Functions
+### Simulation Functions
+- Organism movement: Implemented based on the Lévy flight model, supporting Random Mode and Temperature Weighted Mode.
+- Environmental interaction: Takes terrain (G/B/Y types), ocean currents and temperature preference into account.
+- Death mechanisms: Death due to insufficient resource supply, expired lifespan and out-of-bound movement.
+
+### Interactive Functions
+- Direction control: Disable single or multiple movement directions (north / south / east / west).
+- Mode switching: Toggle ocean current effect and lifespan limit on or off.
+- Result export: Export PNG images with transparent background and customize colors of surviving individuals.
+
+## 6. Troubleshooting
+### 6.1 Startup Failure: ModuleNotFoundError
+- Cause: Dependent packages are missing or incompletely installed.
+- Solution: Re-run the dependency installation command. If the problem persists, manually install the missing packages via `pip install [package name]`.
+
+### 6.2 Failed to Read Excel Files
+- Causes:
+  1. Incorrect file format (not `.xlsx`);
+  2. Mismatched dimensions between map file and temperature file (Weighted Mode);
+  3. File path contains Chinese characters or special symbols.
+- Solutions:
+  1. Ensure all files use the `.xlsx` format (`.xls` is not supported);
+  2. Keep rows and columns consistent between the map file and temperature file in Weighted Mode;
+  3. Move files to a path without Chinese characters or spaces (e.g. `D:/sim_data/map.xlsx`).
+
+### 6.3 Slow Simulation
+- Cause: Excessive organisms (over 1000) or too many simulation steps (over 200000).
+- Solution: Reduce the number of organisms (500 or fewer recommended) or cut down maximum steps (100000 or fewer recommended).
+
+### 6.4 Failed to Export PNG Files
+- Cause: Save path contains Chinese characters / special symbols, or the folder has no write permission.
+- Solution: Select a path without Chinese characters or spaces (e.g. `D:/sim_results/paths.png`), and confirm write access to the target folder.
+
+### 6.5 Program Window Crashes Immediately after Launch
+- Cause: Python version lower than 3.8, or Matplotlib backend conflict.
+- Solution: Upgrade Python to 3.8 or above. If the issue remains, add the following code at the start of `main.py`:
+```python
+import matplotlib
+matplotlib.use('TkAgg')
+```
+
+## 7. Notes
+1. **Map file format**: No header rows. Terrain data (G/B/Y types) and ocean current direction data are stored directly in a grid layout.
+2. **Temperature file format**: No header rows. Keep the same dimensions as the map file and store temperature values.
+3. **Performance optimization**: For low-spec devices, set the organism quantity to 200–300 and maximum steps to 50000.
+4. **Result reproducibility**: Enter a fixed random seed (e.g. 12345) to reproduce identical simulation results.
