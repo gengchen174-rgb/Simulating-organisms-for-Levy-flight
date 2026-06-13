@@ -124,6 +124,7 @@ def calculate_step_duration(levy_rng: np.random.RandomState, levy_exp: float, se
     return t
 
 
+
 def choose_alpha(row: int, col: int, grid_map, temp_map, ignore_disabled=False,
                  dir_rng: random.Random = None, disabled_directions=None, direction_mode="weighted") -> float:
     """
@@ -313,8 +314,7 @@ class Agent:
             if hasattr(self, 'global_path_manager'):
                 delattr(self, 'global_path_manager')
 
-        # ------------ 使用实例变量self.levy_exp和self.self_speed ------------
-        # 调用独立函数计算步进持续时间
+        # Levy运动模式计算步进时间
         t = calculate_step_duration(
             levy_rng=self.levy_rng,
             levy_exp=self.levy_exp,
@@ -626,11 +626,21 @@ def run_simulation_fast(
         step_time_multiplier=1,  # 新增：步进时间缩放因子
         maximize_window=False,  # 新增：模拟结束后是否最大化窗口
         auto_save_visualization=False,  # 新增：是否在模拟过程中自动保存可视化
-        record_video=False  # 新增：是否录制模拟视频
+        record_video=False,  # 新增：是否录制模拟视频
+        disable_north=False,  # 新增：禁用北方移动
+        disable_south=False,  # 新增：禁用南方移动
+        disable_east=False,  # 新增：禁用东方移动
+        disable_west=False  # 新增：禁用西方移动
 ):
     """修复：正确使用配置参数而不是全局变量"""
     # 加载配置获取最新的用户输入
     config = load_config()
+
+    # 更新方向禁用设置（使用传入的参数值）
+    disabled_directions["N"] = disable_north
+    disabled_directions["S"] = disable_south
+    disabled_directions["E"] = disable_east
+    disabled_directions["W"] = disable_west
 
     # 修复：使用传入的参数值而不是配置中的值
     # 确保传入的参数值优先于配置文件中的默认值

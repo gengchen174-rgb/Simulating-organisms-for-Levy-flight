@@ -52,6 +52,7 @@ DEFAULT_CONFIG = {
     "enable_b_supply": False,  # 新增：是否启用B区域补给功能
     "b_supply_percent": 50,    # 新增：B区域补给百分比（相对于G区域补给时间）
     "enable_dual_levy": False,  # 新增：是否启用双LEVY_EXP模式
+    "levy_exp_value": "1.5",  # 新增：LEVY_EXP值选择（"1.5" 或 "2.0"）
     "maximize_window": False,  # 新增：模拟结束后是否最大化窗口
     "auto_save_visualization": False,  # 新增：是否在模拟过程中自动保存可视化
     "record_video": False  # 新增：是否录制模拟视频

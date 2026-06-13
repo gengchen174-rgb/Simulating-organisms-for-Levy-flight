@@ -87,10 +87,11 @@ def select_file_ui():
                 "enable_b_supply": enable_b_supply_var.get(),  # 新增：B区域补给启用状态
                 "b_supply_percent": float(b_supply_percent_entry.get()),  # 新增：B区域补给百分比
                 "enable_dual_levy": dual_levy_var.get(),  # 新增：双LEVY_EXP模式启用状态
+                "levy_exp_value": levy_exp_var.get(),  # 新增：LEVY_EXP值选择
                 "step_time_multiplier": int(step_time_var.get()),  # 新增：步进时间缩放因子
                 "maximize_window": maximize_window_var.get(),  # 新增：最大化窗口
                 "auto_save_visualization": auto_save_viz_var.get(),  # 新增：自动保存可视化
-                "record_video": record_video_var.get()  # 新增：录制视频
+                "record_video": record_video_var.get(),  # 新增：录制视频
             }
             save_config(saved_config)
             print("Configuration saved:", saved_config)  # Debug info
@@ -247,7 +248,7 @@ def select_file_ui():
                 step_time_multiplier=step_time_multiplier,  # 新增：步进时间缩放因子
                 maximize_window=maximize_window_var.get(),  # 新增：最大化窗口
                 auto_save_visualization=auto_save_viz_var.get(),  # 新增：自动保存可视化
-                record_video=record_video_var.get()  # 新增：录制视频
+                record_video=record_video_var.get(),  # 新增：录制视频
             )
             # 新增：强制关闭所有图形窗口，释放资源
             import matplotlib.pyplot as plt
@@ -307,10 +308,13 @@ def select_file_ui():
                 step_time_multiplier=step_time_multiplier,  # 新增：步进时间缩放因子
                 maximize_window=maximize_window_var.get(),  # 新增：最大化窗口
                 auto_save_visualization=auto_save_viz_var.get(),  # 新增：自动保存可视化
-                record_video=record_video_var.get()  # 新增：录制视频
+                record_video=record_video_var.get(),  # 新增：录制视频
             )
             gc.collect()
         else:
+            # 根据用户选择的 LEVY_EXP 值运行模拟
+            selected_levy_exp = float(levy_exp_var.get())
+            print(f"Selected LEVY_EXP value: {selected_levy_exp}")
             run_simulation_fast(
                 excel_path=excel_path,
                 n_agents=n_agents,
@@ -318,7 +322,7 @@ def select_file_ui():
                 direction_seed=direction_seed,
                 levy_seed=levy_seed,
                 temp_path=temp_path,
-                levy_exp=LEVY_EXP_PRIMARY,
+                levy_exp=selected_levy_exp,  # 使用用户选择的 LEVY_EXP 值
                 enable_lifespan_terminal=enable_lifespan_terminal,
                 max_life_seconds=max_life_seconds,
                 direction_mode=direction_mode,  # 确保传递UI选择的模式
@@ -333,7 +337,7 @@ def select_file_ui():
                 step_time_multiplier=step_time_multiplier,  # 新增：步进时间缩放因子
                 maximize_window=maximize_window_var.get(),  # 新增：最大化窗口
                 auto_save_visualization=auto_save_viz_var.get(),  # 新增：自动保存可视化
-                record_video=record_video_var.get()  # 新增：录制视频
+                record_video=record_video_var.get(),  # 新增：录制视频
             )
     # ---- UI控件布局（完全保持不变） ---------------------------------------
     LABEL_WIDTH = 25
@@ -542,19 +546,33 @@ def select_file_ui():
     ttk.Checkbutton(advanced_frame, text="Terminate by Agent's Total Lifespan (Ignore Max Steps)",
                     variable=enable_lifespan_terminal_var).grid(row=1, column=1, columnspan=3, padx=PADX,
                                                                 pady=PADY_SMALL, sticky="w")
-    ttk.Label(advanced_frame, text="Dual LEVY_EXP Mode:", width=LABEL_WIDTH).grid(row=2, column=0, padx=PADX,
+    
+    # LEVY_EXP 选择
+    ttk.Label(advanced_frame, text="LEVY_EXP Value:", width=LABEL_WIDTH).grid(row=2, column=0, padx=PADX,
+                                                                               pady=PADY_SMALL, sticky="w")
+    levy_exp_var = tk.StringVar(value=config.get("levy_exp_value", "1.5"))
+    levy_exp_combo = ttk.Combobox(advanced_frame, textvariable=levy_exp_var, state="readonly", width=10)
+    levy_exp_combo['values'] = ("1.5", "2.0")
+    levy_exp_combo.grid(row=2, column=1, padx=PADX, pady=PADY_SMALL, sticky="w")
+    ttk.Label(advanced_frame, text="(Select Levy flight exponent)", font=("Arial", 8)).grid(row=2,
+                                                                                            column=2,
+                                                                                            padx=PADX,
+                                                                                            pady=PADY_SMALL, sticky="w")
+    
+    # Dual LEVY_EXP Mode
+    ttk.Label(advanced_frame, text="Dual LEVY_EXP Mode:", width=LABEL_WIDTH).grid(row=3, column=0, padx=PADX,
                                                                                   pady=PADY_SMALL, sticky="w")
     dual_levy_var = tk.BooleanVar(value=config["enable_dual_levy"])
     ttk.Checkbutton(advanced_frame, text="Run both LEVY_EXP simulations (Serial Execution)",
-                    variable=dual_levy_var).grid(row=2, column=1, padx=PADX, pady=PADY_SMALL, sticky="w")
-    ttk.Label(advanced_frame, text="(Modify LEVY_EXP_PRIMARY/SECONDARY in main_200.py)", font=("Arial", 8)).grid(row=2,
+                    variable=dual_levy_var).grid(row=3, column=1, padx=PADX, pady=PADY_SMALL, sticky="w")
+    ttk.Label(advanced_frame, text="(Override LEVY_EXP selection, run 1.5 then 2.0)", font=("Arial", 8)).grid(row=3,
                                                                                                                  column=2,
                                                                                                                  columnspan=2,
                                                                                                                  padx=PADX,
                                                                                                                  pady=PADY_SMALL, sticky="w")
 
     # 11. 可视化设置区（row=10）
-    viz_frame = ttk.LabelFrame(root, text="Visualization Settings", relief=tk.GROOVE)
+    viz_frame = ttk.LabelFrame(root, text="Visualization & Movement Settings", relief=tk.GROOVE)
     viz_frame.grid(row=10, column=0, columnspan=3, padx=PADX, pady=PADY_LARGE, sticky="we")
 
     maximize_window_var = tk.BooleanVar(value=config.get("maximize_window", False))
