@@ -416,6 +416,7 @@ class AutomatedExperimentCore:
             # 基本参数
             'ExportPrefix': f'experiment_{self.current_experiment_index + 1}',
             'MapPath': 'map/205.xlsx',
+            'TempPath': '',  # 温度文件路径（weighted模式需要）
             'NAgents': 200,  # 与DEFAULT_CONFIG中的number_of_agents一致
             'MaxSteps': 100000,  # 与DEFAULT_CONFIG中的max_steps一致
             
@@ -434,11 +435,28 @@ class AutomatedExperimentCore:
             'LifespanYears': 30.0,  # 与DEFAULT_CONFIG中的lifespan_years一致
             
             # 模式参数
-            'DirectionMode': 'weighted',  # 与DEFAULT_CONFIG中的direction_mode一致
+            'DirectionMode': 'random',  # 与DEFAULT_CONFIG中的direction_mode一致（默认改为random）
             'CurrentInfluenceMode': 'with_current',  # 与DEFAULT_CONFIG中的current_influence_mode一致
             
+            # 方向禁用设置（N/S/E/W）
+            'DisableNorth': False,   # 禁用北方
+            'DisableSouth': False,   # 禁用南方
+            'DisableEast': False,    # 禁用东方
+            'DisableWest': False,    # 禁用西方
+            
             # 双Levy模式
-            'DualLevyMode': 'no'  # 与DEFAULT_CONFIG中的enable_dual_levy一致
+            'DualLevyMode': 'no',  # 与DEFAULT_CONFIG中的enable_dual_levy一致
+            
+            # Levy EXP值选择
+            'LevyExpValue': '1.5',  # Levy飞行指数值选择（"1.5" 或 "2.0"）
+            
+            # 步进时间缩放因子
+            'StepTimeMultiplier': 1,  # 与ui_selector中的step_time_multiplier一致
+            
+            # 可视化设置
+            'MaximizeWindow': False,  # 模拟结束后是否最大化窗口
+            'AutoSaveVisualization': False,  # 是否在模拟过程中自动保存可视化
+            'RecordVideo': False  # 是否录制模拟视频
         }
         
         # 解析基本参数 - 确保CSV/XLSX参数优先
@@ -521,10 +539,44 @@ class AutomatedExperimentCore:
             self.log(f"[INFO] 温度权重模式已禁用，强制使用随机模式")
             params['direction_mode'] = 'random'
         
-        # 设置temp_path：random模式下为None
-        params['temp_path'] = None
+        # 设置temp_path：支持从配置文件读取
+        temp_path_from_config = self._get_param_with_priority(experiment_row, 'TempPath', EXPERIMENT_DEFAULTS['TempPath'])
+        if params['direction_mode'] == 'weighted' and temp_path_from_config and temp_path_from_config != '':
+            params['temp_path'] = temp_path_from_config
+            self.log(f"使用weighted模式，温度文件路径: {params['temp_path']}")
+        else:
+            params['temp_path'] = None
         
         self.log(f"方向模式: {params['direction_mode']}, TempPath: {params['temp_path']}")
+        
+        # 解析方向禁用设置
+        params['disable_north'] = yes_no_to_bool(self._get_param_with_priority(experiment_row, 'DisableNorth', EXPERIMENT_DEFAULTS['DisableNorth']))
+        params['disable_south'] = yes_no_to_bool(self._get_param_with_priority(experiment_row, 'DisableSouth', EXPERIMENT_DEFAULTS['DisableSouth']))
+        params['disable_east'] = yes_no_to_bool(self._get_param_with_priority(experiment_row, 'DisableEast', EXPERIMENT_DEFAULTS['DisableEast']))
+        params['disable_west'] = yes_no_to_bool(self._get_param_with_priority(experiment_row, 'DisableWest', EXPERIMENT_DEFAULTS['DisableWest']))
+        self.log(f"方向禁用设置 - 北: {params['disable_north']}, 南: {params['disable_south']}, 东: {params['disable_east']}, 西: {params['disable_west']}")
+        
+        # 解析步进时间缩放因子
+        params['step_time_multiplier'] = int(self._get_param_with_priority(experiment_row, 'StepTimeMultiplier', EXPERIMENT_DEFAULTS['StepTimeMultiplier']))
+        if params['step_time_multiplier'] < 1:
+            self.log(f"警告：步进时间缩放因子必须>=1，当前值：{params['step_time_multiplier']}，将使用默认值")
+            params['step_time_multiplier'] = EXPERIMENT_DEFAULTS['StepTimeMultiplier']
+        self.log(f"步进时间缩放因子: {params['step_time_multiplier']}")
+        
+        # 解析可视化设置
+        params['maximize_window'] = yes_no_to_bool(self._get_param_with_priority(experiment_row, 'MaximizeWindow', EXPERIMENT_DEFAULTS['MaximizeWindow']))
+        params['auto_save_visualization'] = yes_no_to_bool(self._get_param_with_priority(experiment_row, 'AutoSaveVisualization', EXPERIMENT_DEFAULTS['AutoSaveVisualization']))
+        params['record_video'] = yes_no_to_bool(self._get_param_with_priority(experiment_row, 'RecordVideo', EXPERIMENT_DEFAULTS['RecordVideo']))
+        self.log(f"可视化设置 - 最大化窗口: {params['maximize_window']}, 自动保存: {params['auto_save_visualization']}, 录制视频: {params['record_video']}")
+        
+        # 解析 Levy EXP 值选择
+        levy_exp_value_raw = self._get_param_with_priority(experiment_row, 'LevyExpValue', EXPERIMENT_DEFAULTS['LevyExpValue'])
+        try:
+            params['levy_exp_value'] = float(levy_exp_value_raw)
+            self.log(f"Levy EXP 值: {params['levy_exp_value']}")
+        except (ValueError, TypeError):
+            self.log(f"警告：无效的 Levy EXP 值 '{levy_exp_value_raw}'，使用默认值 1.5")
+            params['levy_exp_value'] = 1.5
         
         return params
     
@@ -571,7 +623,15 @@ class AutomatedExperimentCore:
                         current_influence_mode=params["current_influence_mode"],
                         enable_lifespan_limit=params["enable_lifespan_limit"],
                         lifespan_years=params["lifespan_years"],
-                        verbose_params=True  # 第一次模拟打印完整参数信息
+                        verbose_params=True,  # 第一次模拟打印完整参数信息
+                        step_time_multiplier=params.get("step_time_multiplier", 1),  # 新增：步进时间缩放因子
+                        maximize_window=params.get("maximize_window", False),  # 新增：最大化窗口
+                        auto_save_visualization=params.get("auto_save_visualization", False),  # 新增：自动保存可视化
+                        record_video=params.get("record_video", False),  # 新增：录制视频
+                        disable_north=params.get("disable_north", False),  # 新增：禁用北方
+                        disable_south=params.get("disable_south", False),  # 新增：禁用南方
+                        disable_east=params.get("disable_east", False),  # 新增：禁用东方
+                        disable_west=params.get("disable_west", False)   # 新增：禁用西方
                     )
                 except Exception as e:
                     self.log(f"第一次模拟执行失败: {e}")
@@ -644,7 +704,15 @@ class AutomatedExperimentCore:
                         current_influence_mode=params["current_influence_mode"],
                         enable_lifespan_limit=params["enable_lifespan_limit"],
                         lifespan_years=params["lifespan_years"],
-                        verbose_params=False  # 第二次模拟只打印关键差异信息
+                        verbose_params=False,  # 第二次模拟只打印关键差异信息
+                        step_time_multiplier=params.get("step_time_multiplier", 1),  # 新增：步进时间缩放因子
+                        maximize_window=params.get("maximize_window", False),  # 新增：最大化窗口
+                        auto_save_visualization=params.get("auto_save_visualization", False),  # 新增：自动保存可视化
+                        record_video=params.get("record_video", False),  # 新增：录制视频
+                        disable_north=params.get("disable_north", False),  # 新增：禁用北方
+                        disable_south=params.get("disable_south", False),  # 新增：禁用南方
+                        disable_east=params.get("disable_east", False),  # 新增：禁用东方
+                        disable_west=params.get("disable_west", False)   # 新增：禁用西方
                     )
                 except Exception as e:
                     self.log(f"第二次模拟执行失败: {e}")
@@ -671,6 +739,9 @@ class AutomatedExperimentCore:
             else:
                 # 单次模拟
                 self.log("执行单次模拟...")
+                # 使用用户指定的 Levy EXP 值
+                selected_levy_exp = params.get('levy_exp_value', 1.5)
+                self.log(f"使用 Levy EXP 值: {selected_levy_exp}")
                 
                 # 使用try-except包装模拟执行，防止崩溃
                 try:
@@ -687,7 +758,7 @@ class AutomatedExperimentCore:
                         direction_seed=params["direction_seed"],
                         levy_seed=params["levy_seed"],
                         temp_path=params["temp_path"],
-                        levy_exp=LEVY_EXP_PRIMARY,
+                        levy_exp=selected_levy_exp,  # 使用用户指定的 Levy EXP 值
                         enable_lifespan_terminal=params["enable_lifespan_terminal"],
                         max_life_seconds=max_life_seconds,
                         direction_mode=params["direction_mode"],
@@ -703,7 +774,15 @@ class AutomatedExperimentCore:
                         current_influence_mode=params["current_influence_mode"],
                         enable_lifespan_limit=params["enable_lifespan_limit"],
                         lifespan_years=params["lifespan_years"],
-                        verbose_params=True  # 单次模拟打印完整参数信息
+                        verbose_params=True,  # 单次模拟打印完整参数信息
+                        step_time_multiplier=params.get("step_time_multiplier", 1),  # 新增：步进时间缩放因子
+                        maximize_window=params.get("maximize_window", False),  # 新增：最大化窗口
+                        auto_save_visualization=params.get("auto_save_visualization", False),  # 新增：自动保存可视化
+                        record_video=params.get("record_video", False),  # 新增：录制视频
+                        disable_north=params.get("disable_north", False),  # 新增：禁用北方
+                        disable_south=params.get("disable_south", False),  # 新增：禁用南方
+                        disable_east=params.get("disable_east", False),  # 新增：禁用东方
+                        disable_west=params.get("disable_west", False)   # 新增：禁用西方
                     )
                 except Exception as e:
                     self.log(f"模拟执行失败: {e}")
